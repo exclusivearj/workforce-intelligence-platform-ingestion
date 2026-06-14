@@ -1,0 +1,40 @@
+version: 2
+
+models:
+  - name: dim_employees
+    description: "SCD Type 1 employee dimension. Salary/performance excluded by design."
+    columns:
+      - name: employee_id
+        description: "Primary key."
+        data_tests:
+          - not_null
+          - unique
+      - name: full_name
+        data_tests:
+          - not_null
+      - name: level
+        data_tests:
+          - accepted_values:
+              values:
+                ["IC1", "IC2", "IC3", "IC4", "IC5", "IC6", "M1", "M2", "M3", "M4", "M5"]
+
+  - name: fct_headcount_daily
+    description: "Daily active headcount grain: date x department x level x employment_type."
+    columns:
+      - name: date
+        data_tests:
+          - not_null
+      - name: headcount
+        description: "Active employee count; must never be negative."
+        data_tests:
+          - not_null
+
+  - name: fct_attrition_monthly
+    description: "Monthly attrition rate + rolling 12-month rate by department."
+    columns:
+      - name: year_month
+        data_tests:
+          - not_null
+      - name: attrition_rate_pct
+        data_tests:
+          - not_null

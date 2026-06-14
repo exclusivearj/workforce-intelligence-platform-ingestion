@@ -1,0 +1,12 @@
+version: 2
+
+models:
+  - name: rpt_recruiting_funnel
+    description: "Application-to-hire funnel by job and month."
+    columns:
+      - name: job_id
+        data_tests:
+          - not_null
+      - name: offer_acceptance_rate_pct
+        data_tests:
+          - not_null

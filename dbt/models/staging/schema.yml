@@ -1,0 +1,38 @@
+version: 2
+
+sources:
+  - name: raw
+    schema: raw
+    description: "Landing zone for source-system payloads (schema-on-write JSONB)."
+    tables:
+      - name: employees
+      - name: job_applications
+      - name: schema_drift_log
+
+models:
+  - name: stg_employees
+    description: "Typed, flattened employee records from workday + airtable."
+    columns:
+      - name: employee_id
+        description: "Natural key from the source system."
+        data_tests:
+          - not_null
+      - name: employment_type
+        data_tests:
+          - accepted_values:
+              values: ["full_time", "part_time", "contractor"]
+      - name: is_active
+        data_tests:
+          - not_null
+
+  - name: stg_job_applications
+    description: "Typed, flattened job applications from greenhouse + airtable."
+    columns:
+      - name: application_id
+        data_tests:
+          - not_null
+      - name: stage
+        data_tests:
+          - accepted_values:
+              values:
+                ["applied", "phone_screen", "interview", "offer", "hired", "rejected"]
