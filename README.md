@@ -1,4 +1,6 @@
-# ingestion — HR data ingestion pipeline
+![workforce-intelligence-platform-ingestion banner](assets/01-ingestion-banner.png)
+
+# workforce-intelligence-platform-ingestion — HR data ingestion pipeline
 
 Part 1 of 4 in the [workforce-intelligence-platform](../README.md).
 
