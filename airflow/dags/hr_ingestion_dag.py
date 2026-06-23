@@ -69,6 +69,8 @@ def hr_ingestion_dag():
 
     @task
     def extract_airtable() -> dict:
+        import logging
+
         from src.connectors.airtable import AirtableConnector
         from src.utils.db import (
             get_connection,
@@ -90,6 +92,12 @@ def hr_ingestion_dag():
                 conn, list(connector.fetch_job_applications()), batch_id, source="airtable"
             )
             conn.commit()
+        except Exception as exc:
+            # Airtable is an optional source (offline-first design): a misconfigured
+            # base or transient API error must not fail the core ingestion pipeline.
+            conn.rollback()
+            logging.getLogger(__name__).warning("Airtable extract skipped: %s", exc)
+            return {"source": "airtable", "rows": 0, "skipped": True, "error": str(exc)}
         finally:
             conn.close()
         return {"source": "airtable", "rows": emp + apps}
@@ -116,13 +124,18 @@ def hr_ingestion_dag():
     def run_dbt_models() -> None:
         from dbt.cli.main import dbtRunner
 
-        project_dir = os.path.join(os.path.dirname(__file__), "..", "..", "dbt")
+        # Default to the in-repo layout (dags/../../dbt); override with
+        # INGESTION_DBT_DIR when the project is mounted elsewhere (e.g. in the
+        # Airflow containers, where 1-ingestion lives at a fixed path).
+        default_dir = os.path.join(os.path.dirname(__file__), "..", "..", "dbt")
+        project_dir = os.getenv("INGESTION_DBT_DIR", default_dir)
         runner = dbtRunner()
-        result = runner.invoke(
-            ["build", "--project-dir", project_dir, "--profiles-dir", project_dir]
-        )
-        if not result.success:
-            raise RuntimeError(f"dbt build failed: {result.exception}")
+        for cmd in (["deps"], ["build"]):
+            result = runner.invoke(
+                [*cmd, "--project-dir", project_dir, "--profiles-dir", project_dir]
+            )
+            if not result.success:
+                raise RuntimeError(f"dbt {cmd[0]} failed: {result.exception}")
 
     @task
     def alert_on_pii_change(drift_events: list) -> None:

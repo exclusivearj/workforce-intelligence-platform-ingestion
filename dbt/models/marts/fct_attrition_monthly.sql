@@ -99,7 +99,7 @@ select
         avg(attrition_rate_pct) over (
             partition by department
             order by month_start
-            rows between 11 preceding and current_row
+            rows between 11 preceding and current row
         ), 2
     ) as rolling_12m_attrition_rate_pct
 from combined

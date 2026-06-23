@@ -62,7 +62,9 @@ class WorkdayConnector(BaseConnector):
         reraise=True,
     )
     def _get(self, url: str, params: dict | None = None) -> dict:
-        headers = {"Authorization": f"Bearer {self.api_token}"}
+        # Only send the bearer header when a token is configured: an empty token
+        # would produce the malformed value "Bearer " which httpx rejects.
+        headers = {"Authorization": f"Bearer {self.api_token}"} if self.api_token else {}
         resp = self._client.get(url, params=params, headers=headers)
         if resp.status_code == 429 or resp.status_code >= 500:
             raise _RetryableStatus(f"retryable status {resp.status_code}")

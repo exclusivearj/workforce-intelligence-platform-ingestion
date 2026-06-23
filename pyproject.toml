@@ -32,6 +32,7 @@ dev = [
     "testcontainers[postgres]>=4.5",
     "ruff>=0.4",
     "sqlfluff>=3.0",
+    "sqlfluff-templater-dbt>=3.0",   # required by templater = "dbt" below
 ]
 
 [tool.ruff]
@@ -57,3 +58,10 @@ omit = ["tests/*", "docker/*"]
 dialect = "postgres"
 templater = "dbt"
 sql_file_exts = ".sql"
+max_line_length = 100   # match ruff's line-length (E501 ignored above)
+# Rules disabled to preserve the intentional house style of these dbt models:
+#   LT01/LT02 — column-aligned `as` clauses and the indentation that follows
+#   RF04      — natural column names that are SQL keywords (date, level, stage, …)
+#   ST06/ST09 — select-target and join ordering are organised for readability
+#   AM06      — mix of positional and named GROUP BY references
+exclude_rules = "LT01,LT02,RF04,ST06,ST09,AM06"

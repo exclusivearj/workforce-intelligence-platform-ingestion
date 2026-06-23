@@ -52,7 +52,7 @@ layer that all other platform modules depend on.
 | Database | Postgres 16 (pgvector image) |
 | Transformations | dbt-core 1.8 + dbt-postgres |
 | Analytical SQL | Trino 438 |
-| Orchestration | Apache Airflow 2.9 (Astronomer) |
+| Orchestration | Apache Airflow 2.9.1 |
 | Testing | pytest + testcontainers |
 | Synthetic data | faker 25+ |
 
@@ -62,22 +62,30 @@ layer that all other platform modules depend on.
 
 ### Prerequisites
 - Docker Desktop running
+- `cp .env.example .env` at the **repo root** (supplies Postgres creds + per-role
+  passwords; the defaults work out of the box for local dev)
 - `make infra-up` executed from the repo root (starts Postgres + Trino + Airflow)
 
 ### Install and seed
 
 ```bash
-cd ingestion
+cd 1-ingestion
 pip install -e ".[dev]"
 make seed          # generates 500 employees + 1000 job applications into Postgres
 make dbt-run       # builds all dbt models
 ```
 
+> `make seed` uses random identifiers, so re-running it **adds** another 500
+> employees rather than replacing them. Run `make infra-reset` from the repo root
+> to start from a clean database. (The Airflow DAG pulls from the mock server with
+> stable IDs, so the scheduled pipeline is idempotent.)
+
 ### Verify Trino access
 
 ```bash
-# Trino CLI (or DBeaver / any JDBC client)
-docker exec -it workforce-intelligence-platform-trino-1 trino
+# Trino CLI (or DBeaver / any JDBC client). The container name is derived from
+# the repo directory: <repo-dir>-trino-1 (e.g. 3-workforce-intelligence-platform-trino-1).
+docker exec -it 3-workforce-intelligence-platform-trino-1 trino
 > SELECT COUNT(*) FROM postgresql.analytics.dim_employees;
 ```
 
@@ -106,19 +114,33 @@ docker exec -it workforce-intelligence-platform-trino-1 trino
 4. Copy your Personal Access Token from https://airtable.com/create/tokens
 5. Set `AIRTABLE_API_KEY` and `AIRTABLE_BASE_ID` in your `.env` file
 
+> **Airtable is optional.** If those two variables are unset the connector reports
+> itself as not configured and the pipeline runs end-to-end on the mock Workday /
+> Greenhouse sources alone. The connector also reads an optional `Applications`
+> table (same base) for job-application records; omit it to ingest employees only.
+
 ---
 
 ## Make targets
 
 | Target | Description |
 |---|---|
-| `make setup` | Install dependencies + start mock Workday server |
-| `make seed` | Generate and load 500 synthetic employees |
-| `make dbt-run` | Run all dbt models |
-| `make test-unit` | Run unit tests (no Docker needed) |
-| `make test-integration` | Run integration tests (requires Postgres) |
-| `make test` | Run all tests |
-| `make lint` | ruff + sqlfluff |
+| `make setup` | `bootstrap` + `mock-server` + `seed` (full local bring-up) |
+| `make bootstrap` | Install deps, then create platform roles + grants (needs Postgres up) |
+| `make mock-server` | Start the mock Workday server in the background on `:5001` |
+| `make seed` | Generate and load 500 employees + 1000 job applications into Postgres |
+| `make dbt-run` | `dbt deps` + run all dbt models |
+| `make dbt-test` | Run all dbt data tests |
+| `make test-unit` | Run unit tests with coverage (no Docker needed) |
+| `make test-integration` | Run integration tests (spins up Postgres via testcontainers) |
+| `make test` | Run unit + integration tests |
+| `make lint` | ruff (Python) + sqlfluff (dbt models) |
+| `make clean` | Remove `__pycache__`, `*.pyc`, and coverage artifacts |
+
+> `make bootstrap` / `make setup` read the per-role passwords from the repo-root
+> `.env` (loaded automatically by the Makefile) and require Postgres to be running.
+> `make lint`'s sqlfluff step uses the dbt templater, so it compiles the project —
+> run it after `make dbt-run` (or any `dbt deps`) with Postgres up.
 
 ---
 
@@ -132,6 +154,34 @@ docker exec -it workforce-intelligence-platform-trino-1 trino
 | `fct_headcount_daily` | marts | Daily headcount by department/level |
 | `fct_attrition_monthly` | marts | Monthly attrition rate + rolling 12m |
 | `rpt_recruiting_funnel` | reports | Application → hire funnel by job/month |
+
+---
+
+## Orchestration
+
+The `hr_ingestion` DAG (`airflow/dags/hr_ingestion_dag.py`, daily 06:00) wires the
+full pipeline: extract from each source → land in `raw` → detect schema drift →
+`dbt build` → alert on PII drift → trigger the downstream `llm_eval` refresh.
+
+It runs end-to-end in the bundled Airflow stack. From the repo root:
+
+```bash
+make infra-up                                   # postgres + trino + mock-hr + airflow
+# Airflow UI at http://localhost:8081 (admin / admin)
+docker compose exec airflow-scheduler airflow dags trigger hr_ingestion
+```
+
+How the bundled stack makes the DAG runnable (see `docker-compose.yml`):
+- the `mock-hr` service serves both Workday workers and Greenhouse applications, so
+  `extract_workday` / `extract_greenhouse` hit a real HTTP stack;
+- the `1-ingestion` tree is mounted at `/opt/ingestion` (`PYTHONPATH`) and the
+  connector/dbt deps are installed via `_PIP_ADDITIONAL_REQUIREMENTS`, so `src` and
+  `dbt` are importable in the scheduler;
+- `extract_airtable` is optional — with no real Airtable base it logs a warning and
+  skips, leaving the rest of the run green.
+
+> For a hardened deployment, bake the project into a custom Airflow image instead of
+> installing deps at container startup.
 
 ---
 
