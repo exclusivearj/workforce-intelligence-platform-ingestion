@@ -136,11 +136,44 @@ docker exec -it 3-workforce-intelligence-platform-trino-1 trino
 | `make test` | Run unit + integration tests |
 | `make lint` | ruff (Python) + sqlfluff (dbt models) |
 | `make clean` | Remove `__pycache__`, `*.pyc`, and coverage artifacts |
+| `make teardown` | Graceful teardown (inverse of `infra-up` + `setup`): stop the local mock-server, drop the dbt schemas + truncate the `raw` tables, clear caches, and shut down the Docker stack |
 
 > `make bootstrap` / `make setup` read the per-role passwords from the repo-root
 > `.env` (loaded automatically by the Makefile) and require Postgres to be running.
 > `make lint`'s sqlfluff step uses the dbt templater, so it compiles the project —
 > run it after `make dbt-run` (or any `dbt deps`) with Postgres up.
+
+### Tearing down
+
+`make teardown` is the graceful inverse of `infra-up` + `setup`. It is re-runnable
+and runs in this order (DB cleanup first, while Postgres is still up):
+
+- stops any **local** mock-server (the host process from `make mock-server`);
+- **drops** the dbt-built `staging` + `analytics` schemas (`make dbt-run` recreates them);
+- **truncates** the `raw` landing tables — kept intact (the structure comes from
+  `docker/init.sql`, applied once at volume init) so `make seed` works again
+  **without** an `infra-reset`;
+- runs `make clean`;
+- shuts down the shared Docker stack via the repo-root `make infra-down`
+  (postgres + trino + airflow + mock-hr).
+
+The DB cleanup is skipped automatically if Postgres is already down, so teardown is
+safe to run at any time. **Volumes are preserved** — sibling-module data
+(`governance` / `dashboard` / `llm`) and Airflow metadata survive a teardown. The
+shared platform login roles are also left intact. To additionally wipe the volumes
+for a fully clean database, use the repo-root target:
+
+```bash
+make infra-reset    # docker compose down -v — full clean DB on next infra-up
+```
+
+To come back up after a teardown:
+
+```bash
+make infra-up                       # repo root — start the stack
+make -C 1-ingestion setup           # bootstrap + seed
+make -C 1-ingestion dbt-run         # rebuild the warehouse
+```
 
 ---
 

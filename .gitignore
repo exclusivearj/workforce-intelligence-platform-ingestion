@@ -32,3 +32,6 @@ dbt/.user.yml
 
 # OS
 .DS_Store
+
+# Local Airtable token scratch file (never commit)
+airtable-token.txt

@@ -93,6 +93,43 @@ def bootstrap_roles(conn) -> list[str]:
     return created
 
 
+# dbt builds these (``dbt run`` recreates them), so teardown drops them outright.
+_DBT_SCHEMAS = ("analytics", "staging")
+# raw tables come from docker/init.sql (run once on volume init); truncate rather
+# than drop so `make seed` works again without a full `infra-reset`.
+_RAW_TABLES = ("raw.employees", "raw.job_applications", "raw.schema_drift_log")
+
+
+def teardown_data(conn) -> list[str]:
+    """Tear down everything the ingestion pipeline writes (inverse of seed + dbt).
+
+    Drops the dbt-built schemas and truncates the raw landing tables (kept intact
+    so seeding works again without recreating the Postgres volume). Deliberately
+    leaves sibling-module schemas (governance/dashboard/llm) and the platform
+    login roles untouched — those are not this module's to remove. Idempotent.
+    Returns a list of the actions performed, for logging.
+    """
+    actions: list[str] = []
+    with conn.cursor() as cur:
+        for schema in _DBT_SCHEMAS:
+            cur.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
+            actions.append(f"dropped schema {schema}")
+
+        # TRUNCATE has no IF EXISTS, so only truncate tables that are still there.
+        existing = []
+        for table in _RAW_TABLES:
+            cur.execute("SELECT to_regclass(%s)", (table,))
+            if cur.fetchone()[0] is not None:
+                existing.append(table)
+        if existing:
+            cur.execute(
+                f"TRUNCATE TABLE {', '.join(existing)} RESTART IDENTITY CASCADE"
+            )
+            actions.append(f"truncated {', '.join(existing)}")
+    conn.commit()
+    return actions
+
+
 def _employee_rows(records: Iterable[EmployeeRaw]):
     for rec in records:
         yield (rec.source_id, json.dumps(rec.model_dump(mode="json")))
